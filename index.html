@@ -99,7 +99,7 @@ input[type=number]:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--
 
 .canvas-area{position:relative;overflow:hidden;background:var(--bg);display:flex;flex-direction:column}
 .ctoolbar{
-  display:flex;align-items:center;gap:.625rem;padding:.625rem .875rem;
+  display:flex;align-items:center;gap:.5rem;padding:.5rem .875rem;
   background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;
 }
 .cinfo{font-size:.74rem;color:var(--muted);font-family:'JetBrains Mono',monospace}
@@ -115,6 +115,14 @@ input[type=number]:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--
 .leg{display:flex;align-items:center;gap:.875rem;flex-wrap:wrap}
 .leg-item{display:flex;align-items:center;gap:.35rem;font-size:.7rem;color:var(--muted)}
 .leg-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+
+/* zoom controls */
+.zoom-group{display:flex;align-items:center;gap:.2rem;background:var(--surface-2);border:1px solid var(--border);border-radius:.45rem;padding:.1rem .2rem}
+.zoom-btn{width:28px;height:28px;border-radius:.3rem;display:flex;align-items:center;justify-content:center;font-size:1.05rem;font-weight:600;color:var(--muted);transition:background .15s,color .15s;line-height:1;user-select:none}
+.zoom-btn:hover{background:var(--border);color:var(--text)}
+.zoom-btn:active{background:var(--primary-hl);color:var(--primary)}
+.zoom-pct{min-width:40px;text-align:center;font-size:.72rem;font-family:'JetBrains Mono',monospace;color:var(--muted);user-select:none}
+.zoom-hint{font-size:.67rem;color:var(--faint);white-space:nowrap}
 
 @keyframes fin{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
 .anim{animation:fin .22s cubic-bezier(.16,1,.3,1) both}
@@ -225,6 +233,13 @@ input[type=number]:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--
       <div class="leg-item"><div class="leg-dot" style="background:var(--node-delete)"></div>刪除</div>
     </div>
     <div style="flex:1"></div>
+    <!-- zoom controls -->
+    <div class="zoom-group">
+      <button class="zoom-btn" onclick="stepZoom(-1)" aria-label="縮小" title="縮小 (Ctrl+滾輪)">−</button>
+      <span class="zoom-pct" id="zoom-pct">100%</span>
+      <button class="zoom-btn" onclick="stepZoom(1)" aria-label="放大" title="放大 (Ctrl+滾輪)">+</button>
+    </div>
+    <span class="zoom-hint" title="按住 Ctrl 再滾動可縮放">Ctrl+滾輪縮放</span>
     <span class="cinfo" id="stats">節點: 0 | 高度: 0</span>
     <button class="btn btn-ghost btn-sm" onclick="resetView()">重置視角</button>
   </div>
@@ -366,6 +381,30 @@ function fade(){clearTimeout(animT);animT=setTimeout(()=>{hl={};draw();},2200);}
 const cv=document.getElementById('cv');
 const ctx2=cv.getContext('2d');
 let vx=0,vy=0,vs=1,drag=false,lmx=0,lmy=0;
+
+/* ── zoom helpers ── */
+const ZOOM_STEPS=[0.25,0.33,0.5,0.67,0.75,0.8,0.9,1,1.1,1.25,1.5,1.75,2,2.5,3,4];
+function updateZoomLabel(){
+  document.getElementById('zoom-pct').textContent=Math.round(vs*100)+'%';
+}
+function applyZoom(newVs,pivotX,pivotY){
+  /* zoom toward pivot point (canvas-centre by default) */
+  const px=pivotX!=null?pivotX:cv.clientWidth/2;
+  const py=pivotY!=null?pivotY:cv.clientHeight/2;
+  const prev=vs;
+  vs=Math.max(0.25,Math.min(4,newVs));
+  vx=px-(px-vx)*(vs/prev);
+  vy=py-(py-vy)*(vs/prev);
+  updateZoomLabel();draw();
+}
+function stepZoom(dir){
+  /* find nearest step then jump one further */
+  let idx=ZOOM_STEPS.findIndex(s=>s>=vs-0.001);
+  if(dir>0)idx=Math.min(ZOOM_STEPS.length-1,(idx<0?ZOOM_STEPS.length-1:idx)+1);
+  else idx=Math.max(0,(idx<=0?0:idx)-1);
+  applyZoom(ZOOM_STEPS[idx]);
+}
+
 function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
 function nodeColor(d){const h=hl[d];if(h==='found')return css('--node-found');if(h==='path')return css('--node-highlight');if(h==='delete')return css('--node-delete');return css('--node-fill');}
 function nodeStroke(d){const h=hl[d];if(h==='found')return css('--success');if(h==='path')return css('--node-highlight');if(h==='delete')return css('--error');return css('--node-stroke');}
@@ -432,16 +471,54 @@ function resize(){
     cv.style.width=w+'px';cv.style.height=h+'px';ctx2.scale(dpr,dpr);
   }
 }
-function resetView(){vx=0;vy=0;vs=1;draw();}
+function resetView(){vx=0;vy=0;vs=1;updateZoomLabel();draw();}
 function updateStats(){document.getElementById('stats').textContent='節點: '+size(root)+' | 高度: '+height(root);}
 
+/* ── pan (mouse drag) ── */
 cv.addEventListener('mousedown',e=>{drag=true;lmx=e.clientX;lmy=e.clientY;});
 window.addEventListener('mouseup',()=>drag=false);
 window.addEventListener('mousemove',e=>{if(!drag)return;vx+=e.clientX-lmx;vy+=e.clientY-lmy;lmx=e.clientX;lmy=e.clientY;draw();});
-cv.addEventListener('wheel',e=>{e.preventDefault();const d=e.deltaY>0?.88:1.12;vs=Math.max(.25,Math.min(4,vs*d));draw();},{passive:false});
-let ltd=0;
-cv.addEventListener('touchstart',e=>{if(e.touches.length===1){drag=true;lmx=e.touches[0].clientX;lmy=e.touches[0].clientY;}if(e.touches.length===2){const dx=e.touches[0].clientX-e.touches[1].clientX,dy=e.touches[0].clientY-e.touches[1].clientY;ltd=Math.sqrt(dx*dx+dy*dy);}},{passive:true});
-cv.addEventListener('touchmove',e=>{e.preventDefault();if(e.touches.length===1&&drag){vx+=e.touches[0].clientX-lmx;vy+=e.touches[0].clientY-lmy;lmx=e.touches[0].clientX;lmy=e.touches[0].clientY;draw();}if(e.touches.length===2){const dx=e.touches[0].clientX-e.touches[1].clientX,dy=e.touches[0].clientY-e.touches[1].clientY;const d=Math.sqrt(dx*dx+dy*dy);vs=Math.max(.25,Math.min(4,vs*(d/ltd)));ltd=d;draw();}},{passive:false});
+
+/* ── wheel: ONLY zoom when Ctrl/Cmd held; otherwise let page scroll ── */
+cv.addEventListener('wheel',e=>{
+  if(!(e.ctrlKey||e.metaKey))return; /* no modifier → ignore, allow normal scroll */
+  e.preventDefault();
+  const rect=cv.getBoundingClientRect();
+  const px=e.clientX-rect.left;
+  const py=e.clientY-rect.top;
+  const factor=e.deltaY>0?0.9:1.1;
+  applyZoom(vs*factor,px,py);
+},{passive:false});
+
+/* ── touch: pan with 1 finger, throttled pinch-zoom with 2 fingers ── */
+let ltd=0,lastPinchTime=0;
+cv.addEventListener('touchstart',e=>{
+  if(e.touches.length===1){drag=true;lmx=e.touches[0].clientX;lmy=e.touches[0].clientY;}
+  if(e.touches.length===2){
+    const dx=e.touches[0].clientX-e.touches[1].clientX;
+    const dy=e.touches[0].clientY-e.touches[1].clientY;
+    ltd=Math.sqrt(dx*dx+dy*dy);
+  }
+},{passive:true});
+cv.addEventListener('touchmove',e=>{
+  e.preventDefault();
+  if(e.touches.length===1&&drag){
+    vx+=e.touches[0].clientX-lmx;vy+=e.touches[0].clientY-lmy;
+    lmx=e.touches[0].clientX;lmy=e.touches[0].clientY;draw();
+  }
+  if(e.touches.length===2){
+    const now=Date.now();
+    if(now-lastPinchTime<40)return; /* throttle: max ~25fps for pinch */
+    lastPinchTime=now;
+    const dx=e.touches[0].clientX-e.touches[1].clientX;
+    const dy=e.touches[0].clientY-e.touches[1].clientY;
+    const d=Math.sqrt(dx*dx+dy*dy);
+    const midX=(e.touches[0].clientX+e.touches[1].clientX)/2-cv.getBoundingClientRect().left;
+    const midY=(e.touches[0].clientY+e.touches[1].clientY)/2-cv.getBoundingClientRect().top;
+    applyZoom(vs*(d/ltd),midX,midY);
+    ltd=d;
+  }
+},{passive:false});
 cv.addEventListener('touchend',()=>drag=false);
 
 document.getElementById('ins-val').addEventListener('keydown',e=>{if(e.key==='Enter')doInsertR();});
@@ -461,6 +538,7 @@ window.addEventListener('resize',draw);
   btn.addEventListener('click',()=>{t=t==='dark'?'light':'dark';set(t);});
 })();
 
+updateZoomLabel();
 draw();
 </script>
 </body>
